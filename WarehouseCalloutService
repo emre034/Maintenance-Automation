@@ -1,0 +1,68 @@
+public with sharing class WarehouseCalloutService implements Queueable {
+
+    // The URL of the external warehouse system
+    private static final String WAREHOUSE_URL = 'https://th-superbadge-apex.herokuapp.com/equipment';
+    
+    /*
+    This method makes a REST callout to an external warehouse system to get a list of equipment that needs to be updated.
+    The callout’s JSON response returns the equipment records that you upsert in Salesforce.
+    This method is annotated with @future(callout=true) to make it asynchronous and allow for callouts.
+    */
+    @future(callout=true)
+    public static void runWarehouseEquipmentSync(){
+        
+        // Create an Http object to make the callout
+        Http http = new Http();
+        
+        // Create a HttpRequest object to specify the endpoint and HTTP method
+        HttpRequest request = new HttpRequest();
+        request.setEndpoint(WAREHOUSE_URL);
+        request.setMethod('GET');
+        
+        // Send the HTTP request and get the response
+        HttpResponse response = http.send(request);
+        
+        // Create a list of Product2 objects to store the equipment records
+        List<Product2> warehouseEq = new List<Product2>();
+        
+        // Check if the callout was successful (response status code is 200)
+        if (response.getStatusCode() == 200){
+            
+            // Deserialize the JSON response into a list of objects
+            List<Object> jsonResponse = (List<Object>)JSON.deserializeUntyped(response.getBody());
+            
+            // Debug the JSON response for troubleshooting purposes
+            System.debug(response.getBody());
+            
+            // Map the fields from the JSON response to the Product2 object
+            // warehouse SKU will be external ID for identifying which equipment records to update within Salesforce
+            for (Object eq : jsonResponse){
+                Map<String,Object> mapJson = (Map<String,Object>)eq;
+                Product2 myEq = new Product2();
+                myEq.Replacement_Part__c = (Boolean) mapJson.get('replacement');
+                myEq.Name = (String) mapJson.get('name');
+                myEq.Maintenance_Cycle__c = (Integer) mapJson.get('maintenanceperiod');
+                myEq.Lifespan_Months__c = (Integer) mapJson.get('lifespan');
+                myEq.Cost__c = (Integer) mapJson.get('cost');
+                myEq.Warehouse_SKU__c = (String) mapJson.get('sku');
+                myEq.Current_Inventory__c = (Double) mapJson.get('quantity');
+                myEq.ProductCode = (String) mapJson.get('_id');
+                warehouseEq.add(myEq);
+            }
+            
+            // If there are any equipment records to upsert, do so and debug a success message
+            if (warehouseEq.size() > 0){
+                upsert warehouseEq;
+                System.debug('Your equipment was synced with the warehouse one');
+            }
+        }
+    }
+    
+    /*
+    This method is called when the queueable job is executed.
+    It simply calls the runWarehouseEquipmentSync method to sync the equipment records with the external warehouse system.
+    */
+    public static void execute (QueueableContext context){
+        runWarehouseEquipmentSync();
+    }
+}

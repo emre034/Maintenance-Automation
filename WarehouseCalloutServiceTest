@@ -1,0 +1,42 @@
+// Test class for WarehouseCalloutService
+@isTest
+private class WarehouseCalloutServiceTest {
+    
+    // Test method for WarehouseCalloutService.runWarehouseEquipmentSync()
+    @isTest  
+    static void testRunWarehouseEquipmentSync(){
+        // Start the test context
+        Test.startTest();
+        
+        // Set up the mock callout
+        Test.setMock(HTTPCalloutMock.class, new WarehouseCalloutServiceMock());
+        
+        // Call the method to be tested
+        WarehouseCalloutService.runWarehouseEquipmentSync();
+        
+        // Stop the test context
+        Test.stopTest();
+        
+        // Assert that the expected record was created
+        System.assertEquals(1, [SELECT count() FROM Product2]);
+    }
+    
+    // Test method for WarehouseCalloutService.execute(QueueableContext)
+    @isTest  
+    static void testExecute(){
+        // Start the test context
+        Test.startTest();
+        
+        // Set up the mock callout
+        Test.setMock(HTTPCalloutMock.class, new WarehouseCalloutServiceMock());
+        
+        // Enqueue the WarehouseCalloutService as a queueable job
+        ID jobID = System.enqueueJob(new WarehouseCalloutService());
+        
+        // Stop the test context
+        Test.stopTest();
+        
+        // Assert that the expected record was created
+        System.assertEquals(1, [SELECT count() FROM Product2]);
+    }     
+}

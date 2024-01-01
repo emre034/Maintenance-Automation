@@ -1,0 +1,79 @@
+public with sharing class MaintenanceRequestHelper {
+
+    public static void updateWorkOrders(List<Case> updatedWorkOrders, Map<Id, Case> nonUpdatedCaseMap) {
+
+        // Set to hold valid case IDs that are closed with type 'Repair' or 'Routine Maintenance'
+        Set<Id> validIds = new Set<Id>();
+
+        // Get valid case IDs
+        for (Case c : updatedWorkOrders) {
+            if (nonUpdatedCaseMap.get(c.Id).Status != 'Closed' && c.Status == 'Closed' &&
+                    (c.Type == 'Repair' || c.Type == 'Routine Maintenance')) {
+                validIds.add(c.Id);
+            }
+        }
+
+        // If there are valid case IDs, create new cases for each closed case with type 'Routine Maintenance'
+        if (!validIds.isEmpty()) {
+
+            // List to hold new cases to be inserted
+            List<Case> newCases = new List<Case>();
+
+            // Map to hold closed cases with type 'Routine Maintenance' and related information
+            Map<Id, Case> closedCasesMap = new Map<Id, Case>([
+                    SELECT Id, Vehicle__c, Equipment__c, Equipment__r.Maintenance_Cycle__c,
+                    (SELECT Id, Equipment__c, Quantity__c FROM Equipment_Maintenance_Items__r)
+                    FROM Case
+                    WHERE Id IN :validIds
+            ]);
+
+            // Map to hold maintenance cycles for closed cases with type 'Routine Maintenance'
+            Map<Id, Decimal> maintenanceCycles = new Map<ID, Decimal>();
+
+            // Aggregate query to get minimum maintenance cycle for each closed case with type 'Routine Maintenance'
+            AggregateResult[] results = [SELECT Maintenance_Request__c, MIN(Equipment__r.Maintenance_Cycle__c) cycle
+                                         FROM Equipment_Maintenance_Item__c
+                                         WHERE Maintenance_Request__c IN :validIds
+                                         GROUP BY Maintenance_Request__c];
+
+            // Populate maintenanceCycles map with results from the aggregate query
+            for (AggregateResult ar : results) {
+                maintenanceCycles.put((Id) ar.get('Maintenance_Request__c'), (Decimal) ar.get('cycle'));
+            }
+
+            // Create new cases for each closed case with type 'Routine Maintenance'
+            for (Case cc : closedCasesMap.values()) {
+                Case newCase = new Case(
+                        ParentId = cc.Id,
+                        Status = 'New',
+                        Subject = 'Routine Maintenance',
+                        Type = 'Routine Maintenance',
+                        Vehicle__c = cc.Vehicle__c,
+                        Equipment__c = cc.Equipment__c,
+                        Origin = 'Web',
+                        Date_Reported__c = Date.Today()
+                );
+
+                // Set due date for new case based on maintenance cycle
+                if (maintenanceCycles.containsKey(cc.Id)) {
+                    newCase.Date_Due__c = Date.today().addDays((Integer) maintenanceCycles.get(cc.Id));
+                } else {
+                    newCase.Date_Due__c = Date.today().addDays((Integer) cc.Equipment__r.Maintenance_Cycle__c);
+                }
+
+                newCases.add(newCase);
+            }
+
+            // Insert new cases
+            insert newCases;
+
+            // Clone equipment maintenance items for each new case
+            List<Equipment_Maintenance_Item__c> clonedWPs = new List<Equipment_Maintenance_Item__c>();
+            for (Case nc : newCases) {
+                for (Equipment_Maintenance_Item__c wp : closedCasesMap.get(nc.ParentId).Equipment_Maintenance_Items__r) {
+                    Equipment_Maintenance_Item__c wpClone = wp.clone();
+                    wpClone.Maintenance_Request__c = nc.Id;
+                    clonedWPs.add(wpClone);
+                }
+            }
+
